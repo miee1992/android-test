@@ -16,12 +16,16 @@
 
 package androidx.test.services.shellexecutor;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
 import android.util.Log;
+import com.google.errorprone.annotations.FormatMethod;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 
 /** Executor to run shell commands with elevated permissions */
@@ -38,6 +42,7 @@ final class ShellCommandExecutor {
     this.executor = executor;
   }
 
+  @FormatMethod
   private static void debug(String msg, Object... args) {
     if (Log.isLoggable(TAG, Log.DEBUG)) {
       Log.d(TAG, String.format(msg, args));
@@ -75,18 +80,57 @@ final class ShellCommandExecutor {
     final Process p = pb.start();
     p.getOutputStream().close();
     p.getErrorStream().close();
+
+    // Using a [CountDownLatch] since [Process.waitFor(timeout, unit)] isn't supported.
+    CountDownLatch processDone = new CountDownLatch(1);
+
+    if (shellCommand.getTimeoutMs() > 0L) {
+      // Thread waits for the process timeout and then destroys the executed process.
+      executor.execute(
+          new Runnable() {
+            @Override
+            public void run() {
+              try {
+                // keep track of overall timeout in case the thread is interrupted
+                long timeout = MILLISECONDS.toNanos(shellCommand.getTimeoutMs());
+                long remainingTimeMs = timeout;
+                long startTime = System.nanoTime();
+                while (processDone.getCount() > 0 && remainingTimeMs > 0) {
+                  try {
+                    // wait on [CountDownLatch]
+                    processDone.await(remainingTimeMs, MILLISECONDS);
+                  } catch (InterruptedException ie) {
+                    /* ignore errors if process is still alive */
+                  } finally {
+                    remainingTimeMs = timeout - (System.nanoTime() - startTime);
+                  }
+                }
+              } finally {
+                if (processDone.getCount() > 0) {
+                  p.destroy();
+                }
+              }
+            }
+          });
+    }
+
     executor.execute(
         new Runnable() {
           @Override
           public void run() {
-            while (true) {
-              try {
-                int returnCode = p.waitFor();
-                debug("Process ended with return code %d", returnCode);
-                return;
-              } catch (InterruptedException e) {
-                Log.e(TAG, "Process interrupted", e);
+            try {
+              while (true) {
+                try {
+                  int returnCode = p.waitFor();
+                  debug("Process ended with return code %d", returnCode);
+                  return;
+                } catch (InterruptedException e) {
+                  Log.e(TAG, "Process interrupted", e);
+                }
               }
+            } finally {
+              // mark subprocess as finished no matter what.
+              processDone.countDown();
             }
           }
         });

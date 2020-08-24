@@ -30,6 +30,7 @@ class ShellCommand {
   private final List<String> parameters;
   private final Map<String, String> shellEnv;
   private final boolean executeThroughShell;
+  private final long timeoutMs;
 
   /**
    * @param command The command to be executed
@@ -42,7 +43,8 @@ class ShellCommand {
       String command,
       List<String> parameters,
       Map<String, String> shellEnv,
-      boolean executeThroughShell) {
+      boolean executeThroughShell,
+      long timeoutMs) {
 
     if (TextUtils.isEmpty(command)) {
       throw new IllegalArgumentException("Null or empty command");
@@ -52,6 +54,7 @@ class ShellCommand {
     this.parameters = Collections.unmodifiableList(new ArrayList<>(parameters));
     this.shellEnv = Collections.unmodifiableMap(new HashMap<>(shellEnv));
     this.executeThroughShell = executeThroughShell;
+    this.timeoutMs = timeoutMs;
   }
 
   public boolean executeThroughShell() {
@@ -68,5 +71,9 @@ class ShellCommand {
 
   public Map<String, String> getShellEnv() {
     return shellEnv;
+  }
+
+  public Long getTimeoutMs() {
+    return timeoutMs;
   }
 }
